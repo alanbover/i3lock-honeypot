@@ -1,0 +1,91 @@
+#!/bin/bash
+
+set -x
+
+# Author: Alan Bover
+#
+# This script takes a picture with the laptop camera when someone not authorized
+# tries to use it / unlock it.
+#
+# It's based on some already known tools like https://github.com/meskarune/i3lock-fancy.
+
+# CAM_DEVICE. Select the video device from where you want to take the picture
+# CAM_DEVICE="/dev/video0"
+CAM_DEVICE=""
+
+# TMP_FOLDER. The folder where to store the temporal images
+# TMP_FOLDER="/tmp"
+TMP_FOLDER=""
+
+# BACKGROUND_IMG. The image to use when the laptop is locked.
+# Note: Recommended to use the tool scrot, like:
+# #> scrot /tmp/screen.png
+# BACKGROUND_IMG="/home/foo/img/screen_locked.png"
+BACKGROUND_IMG=""
+
+# KEYCAPTURE_PATH. The path for keyCapture binary, a keylogger required to know whether
+# there is an unauthorized access
+# KEYCAPTURE_PATH="/usr/local/bin/keyCapture"
+KEYCAPTURE_PATH=""
+
+# KEYCAPTURE_ARGS. The arguments for keyCapture execution.
+# You can your keyboard and mouse devices using the "xinput" command.
+# KEYCAPTURE_ARGS="-expectedKey '.' -keyboardDevice 'Some device' -mouseDevice 'Some device'"
+KEYCAPTURE_ARGS=""
+
+# STORE_FOLDER. The folder where to store the images
+# STORE_FOLDER="/home/foo/img/capture"
+STORE_FOLDER=""
+
+# IMAGE_SIZE. The size of the image that will be shown after the picture has been taken
+# IMAGE_SIZE="1920x1024"
+IMAGE_SIZE=""
+
+function capture_picture {
+  rm -f ${TMP_FOLDER}/capture.jpg
+  until [ -f ${TMP_FOLDER}/capture.jpg ]; do
+    ffmpeg -y -f video4linux2 -s vga -i ${CAM_DEVICE} -vframes 1 ${TMP_FOLDER}/capture.jpg
+  done
+}
+
+function modify_picture {
+  mogrify -resize ${IMAGE_SIZE} ${TMP_FOLDER}/capture.jpg
+  # Optional: Write a message on the picture
+  #convert -pointsize 120 -fill yellow -draw 'text 10,860 "This is my poker face" ' ${TMP_FOLDER}/capture.jpg ${TMP_FOLDER}/capture.jpg
+  #convert -pointsize 120 -fill yellow -draw 'text 10,1000 "trying to troll a laptop" ' ${TMP_FOLDER}/capture.jpg ${TMP_FOLDER}/capture.jpg
+  mogrify -format png ${TMP_FOLDER}/capture.jpg
+}
+
+function relaunch_i3lock {
+  killall i3lock
+  i3lock -i ${1} -p win
+}
+
+# Lock the computer, setting a background image and allowing to move the mouse
+i3lock -i ${BACKGROUND_IMG} -p win
+
+# Check if the first key captured is the expected one
+sudo ${KEYCAPTURE_PATH} ${KEYCAPTURE_ARGS}
+
+if [ $? -ne 0 ]; then
+
+  # Make a picture from the cam device
+  capture_picture
+
+  # Resize the picture and add the meme text
+  modify_picture
+
+  # Launch i3 lock again with the captured image
+  relaunch_i3lock ${TMP_FOLDER}/capture.png
+
+  # Wait 30 seconds and check if the computer is still locked, to avoid storing pictures if
+  # the picture is taken accidentally
+  sleep 30
+  if [ $(ps aux | grep -v grep | grep i3lock | wc -l) -ne 0 ]; then
+    # Store the image to a desired location
+    mv ${TMP_FOLDER}/capture.png ${STORE_FOLDER}/capture.$(date +%Y%m%d%H%M).jpg
+    # Call the lock script itself to start over again
+    killall i3lock
+    $(realpath $0) &
+  fi
+fi
